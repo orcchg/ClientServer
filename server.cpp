@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "logger.h"
+#include "message.h"
 
 /* Объявление класса Сервера */
 // --------------------------------------------------------------------------------------------------------------------
@@ -33,7 +34,7 @@ private:
   bool m_is_stopped;
   int m_socket;
 
-  void printClientInfo(sockaddr_in& peeraddr);
+  Message getMessage(int socket, bool* is_closed);
   void handleRequest(int socket);  // other thread
 };
 
@@ -116,18 +117,45 @@ void Server::stop() {
 }
 
 // ----------------------------------------------
-void Server::printClientInfo(sockaddr_in& peeraddr) {
-  INF("Connection from IP %d.%d.%d.%d, port %d",
-        (ntohl(peeraddr.sin_addr.s_addr) >> 24) & 0xff, // High byte of address
-        (ntohl(peeraddr.sin_addr.s_addr) >> 16) & 0xff, // . . .
-        (ntohl(peeraddr.sin_addr.s_addr) >> 8) & 0xff,  // . . .
-        ntohl(peeraddr.sin_addr.s_addr) & 0xff,         // Low byte of address
-        ntohs(peeraddr.sin_port));
+Message Server::getMessage(int socket, bool* is_closed) {
+  char buffer[MESSAGE_SIZE];
+  memset(buffer, 0, MESSAGE_SIZE);
+  int read_bytes = recv(socket, buffer, MESSAGE_SIZE, 0);
+  if (read_bytes <= 0) {
+    if (read_bytes == -1) {
+      ERR("get request error: %s", strerror(errno));
+    }
+    DBG("Connection closed");
+    *is_closed = true;
+    return Message::EMPTY;
+  }
+  try {
+    DBG("Raw request[%i bytes]: %.*s", read_bytes, (int) read_bytes, buffer);
+    return Message::parse(buffer);
+  } catch (ParseException exception) {
+    FAT("ParseException on raw request[%i bytes]: %.*s", read_bytes, (int) read_bytes, buffer);
+    return Message::EMPTY;
+  }
 }
 
 // ----------------------------------------------
 void Server::handleRequest(int socket) {
   while (!m_is_stopped) {
+    // peers' messages
+    bool is_closed = false;
+    Message message = getMessage(socket, &is_closed);
+    if (is_closed) {
+      DBG("Stopping peer thread...");
+      close(socket);
+      return;
+    }
+
+    //if (message == Message::EMPTY) {
+    //  // ignore empty message
+    //  continue;
+    //}
+
+    //sendMessage(message);
   }
 }
 

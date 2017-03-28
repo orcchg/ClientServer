@@ -18,12 +18,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "logger.h"
+#include "message.h"
 
 /* Объявление класса Клиента */
 // --------------------------------------------------------------------------------------------------------------------
 class Client {
 public:
-  Client(const std::string& config_file);
+  Client(const std::string& name, const std::string& config_file);
   ~Client();
 
   void init();
@@ -37,8 +38,10 @@ private:
   bool m_is_connected;
   bool m_is_stopped;
 
-  bool readConfiguration(const std::string& config_file);
+  std::string m_name;
 
+  bool readConfiguration(const std::string& config_file);
+  Message getMessage(int socket, bool* is_closed);
   void receiverThread();
   void end();
 };
@@ -47,8 +50,8 @@ struct ClientException {};
 
 /* Реализация всех функций-членов класса Клиента */
 // --------------------------------------------------------------------------------------------------------------------
-Client::Client(const std::string& config_file)
-  : m_socket(-1), m_ip_address(""), m_port("http"), m_is_connected(false), m_is_stopped(false) {
+Client::Client(const std::string& name, const std::string& config_file)
+  : m_socket(-1), m_ip_address(""), m_port("http"), m_is_connected(false), m_is_stopped(false), m_name(name) {
   if (!readConfiguration(config_file)) {
     throw ClientException();
   }
@@ -106,6 +109,15 @@ void Client::run() {
 
   std::thread t(&Client::receiverThread, this);
   t.detach();
+
+  Message message;
+  message.login = m_name;
+
+  std::ostringstream oss;
+  std::cin.ignore();
+  while (!m_is_stopped && getline(std::cin, message.text)) {
+    //sendMessage(message);
+  }
 }
 
 // ----------------------------------------------
@@ -135,24 +147,42 @@ bool Client::readConfiguration(const std::string& config_file) {
 }
 
 // ----------------------------------------------
+Message Client::getMessage(int socket, bool* is_closed) {
+  char buffer[MESSAGE_SIZE];
+  memset(buffer, 0, MESSAGE_SIZE);
+  int read_bytes = recv(socket, buffer, MESSAGE_SIZE, 0);
+  if (read_bytes <= 0) {
+    if (read_bytes == -1) {
+      ERR("get response error: %s", strerror(errno));
+    } else if (read_bytes == 0) {
+      printf("\e[5;00;31mSystem: Server shutdown\e[m\n");
+    }
+    DBG("Connection closed");
+    *is_closed = true;
+    return Message::EMPTY;
+  }
+  try {
+    DBG("Raw response[%i bytes]: %.*s", read_bytes, (int) read_bytes, buffer);
+    return Message::parse(buffer);
+  } catch (ParseException exception) {
+    FAT("ParseException on raw response[%i bytes]: %.*s", read_bytes, (int) read_bytes, buffer);
+    return Message::EMPTY;
+  }
+}
+
+// ----------------------------------------------
 void Client::receiverThread() {
   while (!m_is_stopped) {
-      /*Response response;  // TODO:
+    // peers' messages
+    Message message = getMessage(m_socket, &m_is_stopped);
 
-      // peers' messages
-      try {
-        Message message = Message::fromJson(response.body);
+    std::chrono::time_point<std::chrono::system_clock> end = std::chrono::system_clock::now();
+    std::time_t end_time = std::chrono::system_clock::to_time_t(end);
+    std::string timestamp(std::ctime(&end_time));
+    int i1 = timestamp.find_last_of('\n');
+    timestamp = timestamp.substr(0, i1);
 
-        std::chrono::time_point<std::chrono::system_clock> end = std::chrono::system_clock::now();
-        std::time_t end_time = std::chrono::system_clock::to_time_t(end);
-        std::string timestamp(std::ctime(&end_time));
-        int i1 = timestamp.find_last_of('\n');
-        timestamp = timestamp.substr(0, i1);
-
-        printf("\e[5;00;33m%s\e[m :: \e[5;01;37m%s\e[m: %s\n", timestamp.c_str(), message.getLogin().c_str(), message.getMessage().c_str());
-      } catch (ConvertException exception) {
-        WRN("Something doesn't like a message has been received. Skip");
-      }*/
+    printf("\e[5;00;33m%s\e[m :: \e[5;01;37m%s\e[m: %s\n", timestamp.c_str(), message.login.c_str(), message.text.c_str());
   }  // while loop ending
 
   end();
@@ -168,18 +198,27 @@ void Client::end() {
 /* Точка входа в программу */
 // --------------------------------------------------------------------------------------------------------------------
 int main(int argc, char** argv) {
+  // read name
+  std::string name = "user";
+  if (argc >= 2) {
+    char buffer[64];
+    memset(buffer, 0, 64);
+    strncpy(buffer, argv[1], strlen(argv[1]));
+    name = std::string(buffer);
+  }
+
   // read configuration
   std::string config_file = "local.cfg";
-  if (argc >= 2) {
-    char buffer[256];
-    memset(buffer, 0, 256);
-    strncpy(buffer, argv[1], strlen(argv[1]));
+  if (argc >= 3) {
+    char buffer[64];
+    memset(buffer, 0, 64);
+    strncpy(buffer, argv[1], strlen(argv[2]));
     config_file = std::string(buffer);
   }
   DBG("Configuration from file: %s", config_file.c_str());
 
   // start client
-  Client client(config_file);
+  Client client(name, config_file);
   client.init();
   client.run();
   return 0;
