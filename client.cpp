@@ -5,11 +5,14 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <arpa/inet.h>
+
+#define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x501
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include "logger.h"
 #include "message.h"
@@ -26,10 +29,9 @@ public:
 
 private:
   int m_id;
-  int m_socket;
+  SOCKET m_socket;
   std::string m_ip_address;
   std::string m_port;
-
   bool m_is_connected;
   bool m_is_stopped;
 
@@ -59,6 +61,14 @@ Client::~Client() {
 
 // ----------------------------------------------
 void Client::init() {
+	WSADATA wsaData;
+	int result = WSAStartup(MAKEWORD(2,2), &wsaData);
+	if (result != 0) {
+		ERR("WSAStartup failed with error: %i", result);
+		throw ClientException();
+	}
+	
+	
   // prepare address structure
   addrinfo hints;
   addrinfo* server_info;
@@ -66,35 +76,39 @@ void Client::init() {
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
 
   int status = getaddrinfo(m_ip_address.c_str(), m_port.c_str(), &hints, &server_info);
   if (status != 0) {
     ERR("Failed to prepare address structure: %s", gai_strerror(status));  // see error message
-    throw ClientException();
+    WSACleanup();
+	throw ClientException();
   }
 
   // establish connection
   addrinfo* ptr = server_info;
 
   for (; ptr != nullptr; ptr = ptr->ai_next) {  // loop through all the results
-    if ((m_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((m_socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) == INVALID_SOCKET) {
       continue;  // failed to get connection socket
     }
-    if (connect(m_socket, server_info->ai_addr, server_info->ai_addrlen) == -1) {
+    if (connect(m_socket, ptr->ai_addr, ptr->ai_addrlen) == SOCKET_ERROR) {
       close(m_socket);
+	  m_socket = INVALID_SOCKET;
       continue;  // failed to connect to a particular server
     }
     break;  // connect to the first particular server we can
   }
 
-  if (ptr == nullptr) {
-    ERR("Failed to connect to Server");
-    m_is_connected = false;
-  } else {
-    m_is_connected = true;
-  }
-
   freeaddrinfo(server_info);  // release address stucture and remove from linked list
+  
+  if (m_socket == INVALID_SOCKET) {
+    ERR("Failed to connect to Server");
+    WSACleanup();
+	throw ClientException();
+  }
+  
+  m_is_connected = true;
 }
 
 // ----------------------------------------------
@@ -127,6 +141,10 @@ void Client::run() {
   std::cin.ignore();
   while (!m_is_stopped && getline(std::cin, message.text)) {
     sendMessage(message);
+    if (message.text == "!exit") {
+      m_is_stopped = true;
+      return;
+    }
   }
 }
 
@@ -179,6 +197,7 @@ void Client::end() {
   DBG("Client closing...");
   m_is_stopped = true;  // stop background receiver thread if any
   close(m_socket);
+  WSACleanup();
 }
 
 // ----------------------------------------------

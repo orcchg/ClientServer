@@ -6,11 +6,10 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <arpa/inet.h>
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include "logger.h"
 #include "message.h"
