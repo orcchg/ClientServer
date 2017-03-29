@@ -32,7 +32,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-// #define ENABLED_LOGGING 1
+//#define ENABLED_LOGGING 1
 
 #ifdef ANDROID
   #include <android/log.h>

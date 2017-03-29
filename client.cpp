@@ -2,15 +2,9 @@
 #include <ctime>
 #include <iostream>
 #include <fstream>
-#include <string>
 #include <sstream>
+#include <string>
 #include <thread>
-#include <unordered_map>
-#include <utility>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -31,6 +25,7 @@ public:
   void run();
 
 private:
+  int m_id;
   int m_socket;
   std::string m_ip_address;
   std::string m_port;
@@ -41,9 +36,11 @@ private:
   std::string m_name;
 
   bool readConfiguration(const std::string& config_file);
-  Message getMessage(int socket, bool* is_closed);
   void receiverThread();
   void end();
+
+  Message getMessage(int socket, bool* is_closed);
+  void sendMessage(const Message& message) const;
 };
 
 struct ClientException {};
@@ -51,7 +48,7 @@ struct ClientException {};
 /* Реализация всех функций-членов класса Клиента */
 // --------------------------------------------------------------------------------------------------------------------
 Client::Client(const std::string& name, const std::string& config_file)
-  : m_socket(-1), m_ip_address(""), m_port("http"), m_is_connected(false), m_is_stopped(false), m_name(name) {
+  : m_id(-1), m_socket(-1), m_ip_address(""), m_port("http"), m_is_connected(false), m_is_stopped(false), m_name(name) {
   if (!readConfiguration(config_file)) {
     throw ClientException();
   }
@@ -107,16 +104,29 @@ void Client::run() {
     throw ClientException();
   }
 
+  // receive id of this peer from Server
+  char buffer[64];
+  memset(buffer, 0, 64);
+  int read_bytes = recv(m_socket, buffer, MESSAGE_SIZE, 0);
+  if (read_bytes <= 0) {
+    DBG("Connection closed: failed to receive hello from Server");
+    end();
+    return;
+  }
+  m_id = std::atoi(buffer);
+  printf("Server has assigned id to this peer: %i\n", m_id);
+
   std::thread t(&Client::receiverThread, this);
   t.detach();
 
   Message message;
+  message.id = m_id;
   message.login = m_name;
 
   std::ostringstream oss;
   std::cin.ignore();
   while (!m_is_stopped && getline(std::cin, message.text)) {
-    //sendMessage(message);
+    sendMessage(message);
   }
 }
 
@@ -147,6 +157,31 @@ bool Client::readConfiguration(const std::string& config_file) {
 }
 
 // ----------------------------------------------
+void Client::receiverThread() {
+  while (!m_is_stopped) {
+    // peers' messages
+    Message message = getMessage(m_socket, &m_is_stopped);
+
+    std::chrono::time_point<std::chrono::system_clock> end = std::chrono::system_clock::now();
+    std::time_t end_time = std::chrono::system_clock::to_time_t(end);
+    std::string timestamp(std::ctime(&end_time));
+    int i1 = timestamp.find_last_of('\n');
+    timestamp = timestamp.substr(0, i1);
+
+    printf("\e[5;00;33m%s\e[m :: \e[5;01;37m%s\e[m: %s\n", timestamp.c_str(), message.login.c_str(), message.text.c_str());
+  }  // while loop ending
+
+  end();
+}
+
+// ----------------------------------------------
+void Client::end() {
+  DBG("Client closing...");
+  m_is_stopped = true;  // stop background receiver thread if any
+  close(m_socket);
+}
+
+// ----------------------------------------------
 Message Client::getMessage(int socket, bool* is_closed) {
   char buffer[MESSAGE_SIZE];
   memset(buffer, 0, MESSAGE_SIZE);
@@ -170,29 +205,13 @@ Message Client::getMessage(int socket, bool* is_closed) {
   }
 }
 
-// ----------------------------------------------
-void Client::receiverThread() {
-  while (!m_is_stopped) {
-    // peers' messages
-    Message message = getMessage(m_socket, &m_is_stopped);
-
-    std::chrono::time_point<std::chrono::system_clock> end = std::chrono::system_clock::now();
-    std::time_t end_time = std::chrono::system_clock::to_time_t(end);
-    std::string timestamp(std::ctime(&end_time));
-    int i1 = timestamp.find_last_of('\n');
-    timestamp = timestamp.substr(0, i1);
-
-    printf("\e[5;00;33m%s\e[m :: \e[5;01;37m%s\e[m: %s\n", timestamp.c_str(), message.login.c_str(), message.text.c_str());
-  }  // while loop ending
-
-  end();
-}
-
-// ----------------------------------------------
-void Client::end() {
-  DBG("Client closing...");
-  m_is_stopped = true;  // stop background receiver thread if any
-  close(m_socket);
+void Client::sendMessage(const Message& message) const {
+  size_t size = message.size() + 1;
+  char* raw = new char[size];
+  memset(raw, 0, size);
+  message.raw(raw);
+  send(m_socket, raw, size, 0);
+  delete [] raw;  raw = nullptr;
 }
 
 /* Точка входа в программу */

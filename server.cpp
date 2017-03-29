@@ -2,15 +2,10 @@
 #include <ctime>
 #include <iostream>
 #include <fstream>
-#include <string>
 #include <sstream>
+#include <string>
 #include <thread>
-#include <unordered_map>
-#include <utility>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <vector>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -19,6 +14,15 @@
 #include <unistd.h>
 #include "logger.h"
 #include "message.h"
+
+struct Peer {
+  int id;
+  int socket;
+
+  Peer(int id, int socket): id(id), socket(socket) {}
+};
+
+static int lastId = 0;
 
 /* Объявление класса Сервера */
 // --------------------------------------------------------------------------------------------------------------------
@@ -33,8 +37,12 @@ public:
 private:
   bool m_is_stopped;
   int m_socket;
+  std::vector<Peer> m_peers;
 
   Message getMessage(int socket, bool* is_closed);
+  void sendMessage(const Message& message);
+  void sendHello(int socket);
+
   void handleRequest(int socket);  // other thread
 };
 
@@ -104,6 +112,10 @@ void Server::run() {
       continue;  // skip failed connection
     }
 
+    m_peers.emplace_back(lastId, peer_socket);
+    sendHello(peer_socket);
+    ++lastId;
+
     // get incoming message
     std::thread t(&Server::handleRequest, this, peer_socket);
     t.detach();
@@ -138,6 +150,26 @@ Message Server::getMessage(int socket, bool* is_closed) {
   }
 }
 
+void Server::sendMessage(const Message& message) {
+  size_t size = message.size() + 1;
+  char* raw = new char[size];
+  memset(raw, 0, size);
+  message.raw(raw);
+
+  for (auto& it : m_peers) {
+    if (it.id != message.id) {
+      send(it.socket, raw, size, 0);
+    }
+  }
+
+  delete [] raw;  raw = nullptr;
+}
+
+void Server::sendHello(int socket) {
+  std::string id_str = std::to_string(lastId);
+  send(socket, id_str.c_str(), id_str.length(), 0);
+}
+
 // ----------------------------------------------
 void Server::handleRequest(int socket) {
   while (!m_is_stopped) {
@@ -150,12 +182,13 @@ void Server::handleRequest(int socket) {
       return;
     }
 
-    //if (message == Message::EMPTY) {
-    //  // ignore empty message
-    //  continue;
-    //}
+    if (message == Message::EMPTY) {
+      // ignore empty message
+      continue;
+    }
 
-    //sendMessage(message);
+    std::cout << message << std::endl;
+    sendMessage(message);
   }
 }
 
