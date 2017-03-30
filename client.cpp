@@ -124,8 +124,11 @@ void Client::run() {
   message.login = m_name;
 
   std::ostringstream oss;
-  std::cin.ignore();
   while (!m_is_stopped && getline(std::cin, message.text)) {
+    if (message.text == "!exit") {
+      m_is_stopped = true;
+      return;
+    }
     sendMessage(message);
   }
 }

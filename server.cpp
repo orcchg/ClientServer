@@ -65,7 +65,7 @@ Server::Server(int port_number)
 
   int status = getaddrinfo(nullptr, port.c_str(), &hints, &server_info);
   if (status != 0) {
-    ERR("Failed to prepare address structure: %s", gai_strerror(status));  // see error message
+    ERR("Failed to prepare address structure[%i]: %s", status, gai_strerror(status));  // see error message
     throw ServerException();
   }
 
