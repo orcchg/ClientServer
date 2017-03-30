@@ -8,8 +8,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x501
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 
 #include <errno.h>
@@ -138,13 +138,12 @@ void Client::run() {
   message.login = m_name;
 
   std::ostringstream oss;
-  std::cin.ignore();
   while (!m_is_stopped && getline(std::cin, message.text)) {
-    sendMessage(message);
     if (message.text == "!exit") {
       m_is_stopped = true;
       return;
     }
+    sendMessage(message);
   }
 }
 
@@ -186,7 +185,7 @@ void Client::receiverThread() {
     int i1 = timestamp.find_last_of('\n');
     timestamp = timestamp.substr(0, i1);
 
-    printf("\e[5;00;33m%s\e[m :: \e[5;01;37m%s\e[m: %s\n", timestamp.c_str(), message.login.c_str(), message.text.c_str());
+    printf("%s :: %s: %s\n", timestamp.c_str(), message.login.c_str(), message.text.c_str());
   }  // while loop ending
 
   end();

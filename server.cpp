@@ -6,8 +6,8 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #include <errno.h>
 #include <unistd.h>
@@ -52,6 +52,13 @@ struct ServerException {};
 Server::Server(int port_number)
   : m_is_stopped(false) {
   std::string port = std::to_string(port_number);
+  
+  WSADATA wsaData;
+  int result = WSAStartup(MAKEWORD(2,2), &wsaData);
+  if (result != 0) {
+    ERR("WSAStartup failed with error: %i", result);
+    throw ServerException();
+  }
 
   // prepare address structure
   addrinfo hints;
@@ -64,7 +71,7 @@ Server::Server(int port_number)
 
   int status = getaddrinfo(nullptr, port.c_str(), &hints, &server_info);
   if (status != 0) {
-    ERR("Failed to prepare address structure: %s", gai_strerror(status));  // see error message
+    ERR("Failed to prepare address structure[%i]: %s", status, gai_strerror(status));  // see error message
     throw ServerException();
   }
 
@@ -83,10 +90,6 @@ Server::Server(int port_number)
   }
 
   freeaddrinfo(server_info);  // release address stucture and remove from linked list
-
-  // when the socket of a type that promises reliable delivery still has untransmitted messages when it is closed
-  linger linger_opt = { 1, 0 };  // timeout 0 seconds - close socket immediately
-  setsockopt(m_socket, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt));
 
   // listen for incoming connections
   listen(m_socket, 20);
